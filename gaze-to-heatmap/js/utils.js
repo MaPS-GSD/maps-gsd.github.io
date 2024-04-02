@@ -16,6 +16,11 @@ function remap(value, oldMin, oldMax, newMin, newMax) {
   return (value - oldMin) * (newMax - newMin) / (oldMax - oldMin) + newMin;
 }
 
+function easeOutExpo(x) {
+  // https://graphtoy.com/?f1(x,t)=1%20-%20pow(2%20,%20-10%20*%20x)&v1=true&grid=1&coords=0.4643520777883696,0.5094777018983969,1.2183071759372475
+  return x === 1 ? 1 : 1 - Math.pow(2, -10 * x);
+}
+
 
 function remapFloatArray(arr, oldMin, oldMax, newMin, newMax) {
   const oldRange = oldMax - oldMin;
@@ -73,4 +78,3 @@ function parseCSV(file) {
 
   return csv;
 }
-

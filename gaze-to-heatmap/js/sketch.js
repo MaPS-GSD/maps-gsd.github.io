@@ -5,15 +5,16 @@ const GAZE_X_COLNAME = "gaze x [px]";
 const GAZE_Y_COLNAME = "gaze y [px]";
 const GAZE_RADIUS = 100; // in pixels
 const GAZE_HUE_RANGE = [240, 0]; // in degrees
-const GAZE_HUE_ALPHA_RANGE = [0, 75]; // in [0, 100] range 
+const GAZE_HUE_ALPHA_RANGE = [0, 90]; // in [0, 100] range 
 
 
 // Process variables (do not modify)
 // const fitRatio = 0.80;
 let canvas;
 let csvFile;
+let bgImg;
 let gazeImgBW, gazeImgHue;
-let msg = `Drag and drop a valid gaze CSV file on this canvas.`;
+let msg = `Drag and drop a background image and/or a valid gaze CSV file on this canvas.`;
 let worker_gaze2field, worker_field2bw, worker_field2hue;
 
 function setup() {
@@ -33,17 +34,22 @@ function setup() {
 function draw() {
   background(0);
 
-  if (gazeImgBW) {
-    // const boxS = width > height ? fitRatio * height : fitRatio & width;
-    // const scaleRatio = gazeImg.width > gazeImg.height ? boxS / gazeImg.width : boxS / gazeImg.height;
-    // const imgW = scaleRatio * gazeImg.width;
-    // const imgH = scaleRatio * gazeImg.height;
-    // image(gazeImg, 0.5 * width, 0.5 * height, imgW, imgH);
-    image(gazeImgBW, 0.5 * width, 0.5 * height);
+  if (bgImg) {
+    image(bgImg, 0.5 * width, 0.5 * height);
+    fill(0);
   }
 
+  // if (gazeImgBW) {
+  //   // const boxS = width > height ? fitRatio * height : fitRatio & width;
+  //   // const scaleRatio = gazeImg.width > gazeImg.height ? boxS / gazeImg.width : boxS / gazeImg.height;
+  //   // const imgW = scaleRatio * gazeImg.width;
+  //   // const imgH = scaleRatio * gazeImg.height;
+  //   // image(gazeImg, 0.5 * width, 0.5 * height, imgW, imgH);
+  //   image(gazeImgBW, 0.5 * width, 0.5 * height);
+  // }
+
   if (gazeImgHue) {
-    background(255);
+    if (!bgImg) background(255);
     image(gazeImgHue, 0.5 * width, 0.5 * height);
     fill(0);
   }
@@ -59,6 +65,18 @@ function draw() {
 
 
 function gotFile(file) {
+
+  if (file.type === 'image') {
+    msg = 'Loading image...';
+
+    bgImg = createImg(file.data, 'background image', 'anonymous', function() {
+      bgImg.hide();
+      msg = `Loaded image with size ${bgImg.width} x ${bgImg.height}.`;
+    });
+
+    return;
+  }
+
   csvFile = file;
 
   msg = 'Parsing file...';

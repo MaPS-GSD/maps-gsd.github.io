@@ -20,7 +20,9 @@ onmessage = (event) => {
   let i4;
   for (let i = 0; i < field.length; i++) {
     const h = remap(field[i], 0, maxv, range[0], range[1]);
-    const a = remap(field[i], 0, maxv, alphas[0], alphas[1]);
+    let a = remap(field[i], 0, maxv, 0, 1);
+    a = easeOutExpo(a);
+    a = remap(a, 0, 1, alphas[0], alphas[1]);
     const hsva = [h, 100, 100, a];
     const rgba = HSBToRGB(hsva);
 
