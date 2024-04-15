@@ -63,6 +63,11 @@ function computeBounds(arr) {
 }
 
 
+/**
+ * Reads a CSV file and returns an array of arrays.
+ * @param {*} file 
+ * @returns 
+ */
 function parseCSV(file) {
   const csv = [];
 
@@ -77,4 +82,53 @@ function parseCSV(file) {
   // the above method will split those cells!
 
   return csv;
+}
+
+/**
+ * Turns a CSV into an array of objects, using the first row as headers.
+ * @param {*} csvFile 
+ * @returns 
+ */
+function csvToJSON(csvFile) {
+  // Guess the new line character used in the file
+  const nlc = detectNewLineCharacter(csvFile.data);
+
+  // Split the file into rows
+  const rows = csvFile.data.split(nlc);
+  const headers = rows[0].split(',');
+
+  const data = [];
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i].split(',');
+    const obj = {};
+    for (let j = 0; j < headers.length; j++) {
+      obj[headers[j]] = row[j];
+    }
+    data.push(obj);
+  }
+
+  return data;
+}
+
+
+// A function that takes a string, and turns it into a 
+// filename safe string by replacing all non-alphanumeric characters
+// and with underscores, removing leading and trailing spaces, and
+// converting the string to lowercase.
+function safeFilename(str) {
+  return str.replace(/[^a-z0-9]/gi, '_').trim().toLowerCase();
+}
+
+
+// A function that takes a string loaded from a file
+// and makes a best guess about the new line character used.
+function detectNewLineCharacter(str) {
+  // gpt-generated
+  if (str.includes('\r\n')) {
+    return '\r\n';
+  } else if (str.includes('\r')) {
+    return '\r';
+  } else {
+    return '\n';
+  }
 }
