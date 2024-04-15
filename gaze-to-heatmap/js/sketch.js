@@ -242,8 +242,9 @@ function keyPressed() {
       // save(gazeImgHue, 'gaze_map_hue.png');
       mapNames.forEach(name => {
         const img = maps[name];
+        const csvfilename = csvFiles.length == 1 ? csvFiles[0].file.name : `multiple_csv`;
         if (img) {
-          save(img, `${safeFilename(csvFile.name)}_${safeFilename(name)}.png`);
+          save(img, `${safeFilename(csvfilename)}_${safeFilename(name)}.png`);
         }
       });
       return;
