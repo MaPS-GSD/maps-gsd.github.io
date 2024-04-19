@@ -3,6 +3,7 @@
 // importScripts('p5.min.js');  // also doesn't work, needs the `window` object!! 😭😭😭
 
 importScripts('utils.js');
+importScripts('../lib/chroma.min.js');
 
 
 /**
@@ -10,9 +11,12 @@ importScripts('utils.js');
  * of gaze values for each pixel in the image. 
  */
 onmessage = (event) => {
-  // console.log(self);
-  
   console.log("Started gaze to field conversion.");
+
+  function pixelID(x, y) {
+    if (x < 0 || x >= data.IMG_WIDTH || y < 0 || y >= data.IMG_HEIGHT) return -1;
+    return y * data.IMG_WIDTH + x;
+  }
   
   const data = event.data;
   const gazeSets = event.data.gazeSets;
@@ -20,10 +24,6 @@ onmessage = (event) => {
   // if (!data.GAZE_INCLUDE_ALL_FILES) {
   //   gazeSets = gazeSets.slice(-1);
   // }
-
-  function pixelID(x, y) {
-    return y * data.IMG_WIDTH + x;
-  }
   
   const pixelCount = data.IMG_HEIGHT * data.IMG_WIDTH;
 
@@ -59,6 +59,7 @@ onmessage = (event) => {
       for (let j = x0; j <= x1; j++) {
         for (let k = y0; k <= y1; k++) {
           pid = pixelID(j, k);
+          if (pid < 0) continue;
           d = distance(x, y, j, k);
           v = 1.0 - smoothStep(0, data.GAZE_RADIUS, d);
           field[pid] += v;

@@ -1,15 +1,38 @@
-// Global parameters
+// Global parameters (tweak to taste)
 const IMG_WIDTH = 1600;
 const IMG_HEIGHT = 1200;
 const GAZE_X_COLNAME = "gaze x [px]";
 const GAZE_Y_COLNAME = "gaze y [px]";
 const GAZE_FIXATION_COLNAME = "fixation id";
 const GAZE_TIMESTAMP_COLNAME = "timestamp [ns]";
-const GAZE_INCLUDE_FIXATION_ONLY = false;
-// const GAZE_INCLUDE_ALL_FILES = true;  // not used anymore
-const GAZE_RADIUS = 30; // in pixels
-const GAZE_HUE_RANGE = [240, -50]; // in degrees
-const GAZE_HUE_ALPHA_RANGE = [0, 70]; // in [0, 100] range 
+let GAZE_INCLUDE_FIXATION_ONLY = false;
+let GAZE_RADIUS = 30; // in pixels
+let GAZE_LINE_WEIGHT = 2; // in pixels
+let GAZE_HUE_RANGE = [240, -50]; // in degrees
+let GAZE_ALPHA_RANGE = [0, 70]; // in [0, 100] range 
+
+
+// Color scales! 🌈
+// For now, we will be only using _named_ color scales from the R colorBrewer package.
+// You can check their names here: 
+// https://www.datanovia.com/en/blog/the-a-z-of-rcolorbrewer-palette/,
+// Or check the console output in the app for a list of all names. 
+// Cool ones are 'Viridis', 'Spectral', 'RdYlGn' (Red-Yellow-Green), 
+// 'PuOr' (Purple-Orange), etc.
+// Note that most Brewer color scales go from lighter to darker,
+// so if you want to link smaller values to darker colors, you should reverse the scale.
+// const COLOR_SCALE_NAME = 'RdYlGn';
+let COLOR_SCALE_NAME = 'Viridis';
+// const COLOR_SCALE_RANGE = [0, 1];  // the value range for the color scale in [0,1] 
+let COLOR_SCALE_RANGE = [1, 0];  // this flips the color scale 
+let COLOR_SCALE_INTERPOLATION_MODE = 'rgb';
+
+console.log("Available color scale names: ");
+console.log(getChromaColorScales());
+console.log("See more at https://www.datanovia.com/en/blog/the-a-z-of-rcolorbrewer-palette/")
+
+
+
 
 // UI params (do not modify)
 const TEXT_SIZE_L = 14;
@@ -27,16 +50,106 @@ let csvFiles = [];
 let bgImg;
 let showBGImg = true;
 let gazeImgBW, gazeImgHue;
-let worker_gaze2field, 
-    worker_field2bw, 
-    worker_field2hue, 
-    worker_gaze2trajectory_hue;
-
-// The collection of generated maps.
-let maps = [];
+let worker_gaze2field;
 let currentMapId = 0;
 let topText = "";
 let bottomText = "";
+
+// The collection of generated maps.
+let maps = [{
+  name: 'Gaze Heatmap - B&W',
+  type: 'worker',
+  worker: (() => {
+    // We need this IIFE to create a new Worker instance
+    // and attach the onmessage callback to it.
+    const w = new Worker('js/worker-field-to-map-bw.js');
+    w.onmessage = loadMapWorkerCallback('Gaze Heatmap - B&W');
+    return w;
+  })(),
+  image: null
+}, 
+{
+  name: 'Gaze Heatmap - Hue',
+  type: 'worker',
+  worker: (() => {
+    const w = new Worker('js/worker-field-to-map-hue.js');
+    w.onmessage = loadMapWorkerCallback('Gaze Heatmap - Hue');
+    return w;
+  })(),
+  image: null
+},
+{
+  name: 'Gaze Trajectory Path - B&W',
+  type: 'function',
+  func: fieldToTrajectoryMapBW,
+  image: null
+},
+{
+  name: 'Gaze Trajectory Path - Hue',
+  type: 'function',
+  func: fieldToTrajectoryMapHUE,
+  image: null
+},
+{
+  name: 'Gaze Trajectory Path - Color Scale',
+  type: 'function',
+  func: fieldToTrajectoryMapColorScale,
+  image: null
+},
+{
+  name: 'Gaze Trajectory Map - Hue v1',
+  type: 'worker',
+  worker: (() => {
+    const w = new Worker('js/worker-gaze-to-trajectory-map-hue.js');
+    w.onmessage = loadMapWorkerCallback('Gaze Trajectory Map - Hue v1');
+    return w;
+  })(),
+  image: null
+},
+{
+  name: 'Gaze Trajectory Map - Hue v2',
+  type: 'worker',
+  worker: (() => {
+    const w = new Worker('js/worker-gaze-to-trajectory-map-hue2.js');
+    w.onmessage = loadMapWorkerCallback('Gaze Trajectory Map - Hue v2');
+    return w;
+  })(),
+  image: null
+},
+{
+  name: 'Gaze Trajectory Map - Hue v3',
+  type: 'worker',
+  worker: (() => {
+    const w = new Worker('js/worker-gaze-to-trajectory-map-hue3.js');
+    w.onmessage = loadMapWorkerCallback('Gaze Trajectory Map - Hue v3');
+    return w;
+  })(),
+  image: null
+},
+{
+  name: 'Gaze Trajectory Map - Color Scale v2',
+  type: 'worker',
+  worker: (() => {
+    const w = new Worker('js/worker-gaze-to-trajectory-map-cs2.js');
+    w.onmessage = loadMapWorkerCallback('Gaze Trajectory Map - Color Scale v2');
+    return w;
+  })(),
+  image: null
+},
+{
+  name: 'Gaze Trajectory Map - Color Scale v3',
+  type: 'worker',
+  worker: (() => {
+    const w = new Worker('js/worker-gaze-to-trajectory-map-cs3.js');
+    w.onmessage = loadMapWorkerCallback('Gaze Trajectory Map - Color Scale v3');
+    return w;
+  })(),
+  image: null
+}
+];
+
+
+
 
 function setup() {
   // Set up workers
@@ -48,7 +161,7 @@ function setup() {
         break;
 
       case 'gazeField':
-        handleGazeField(event.data.field, event.data.size);
+        handleGazeField(event);
         break;
       
       case 'error':
@@ -57,16 +170,6 @@ function setup() {
     }
   }
   
-  worker_field2bw = new Worker('js/worker-field-to-map-bw.js');
-  worker_field2bw.onmessage = loadMapWorkerCallback('Gaze Heatmap: B&W');
-
-  worker_field2hue = new Worker('js/worker-field-to-map-hue.js');
-  worker_field2hue.onmessage = loadMapWorkerCallback('Gaze Heatmap: Hue');
-
-  worker_gaze2trajectory_hue = new Worker('js/worker-gaze-to-trajectory-map-hue.js');
-  worker_gaze2trajectory_hue.onmessage = loadMapWorkerCallback('Gaze Trajectory: Hue');
-
-
   // Set canvas up
   canvasSize = fitCanvasToWindow();
   canvas = createCanvas(canvasSize.width, canvasSize.height); 
@@ -91,10 +194,10 @@ function draw() {
   }
 
   // Render current map
-  let imgObj = maps[currentMapId];
-  if (imgObj && imgObj.image) {
-    image(imgObj.image, 0.5 * width, 0.5 * height, width, height);
-    bottomText = `Displaying computed map ${currentMapId + 1}/${maps.length}: '${imgObj.name}'`;
+  const map = maps[currentMapId];
+  if (map && map.image) {
+    image(map.image, 0.5 * width, 0.5 * height, width, height);
+    bottomText = `Displaying computed map ${currentMapId + 1}/${maps.length}: '${map.name}'`;
   }
 
   // Render UI stuff
@@ -107,55 +210,45 @@ function draw() {
 
 
 function gotFile(file) {
-  // New maps
-  maps = [];
-
   if (file.type === 'image') {
     bottomText = 'Loading image...';
-
+    
     bgImg = createImg(file.data, 'background image', 'anonymous', function() {
       bgImg.hide();
       bottomText = `Loaded background image with size ${bgImg.width} x ${bgImg.height}.`;
     });
-
+    
     return;
   }
-
+    
   const csvF = {
     file: file,
     gazeData: csvToJSON(file).map(parseGazeJSON)
   }
   csvFiles.push(csvF);
-
+  
   topText = `Loaded file: '${file.name}', file type: ${file.type}, file size: ${file.size} bytes`;
-
+  
   bottomText = 'Parsing file...';
+  
+  compute();
+}
 
-  // Use workers to push all the heavy computation to a separate thread
+function compute() {
   const gazeSets = csvFiles.map(f => f.gazeData);
+
+  // Use workers to push all the heavy computation to a separate thread.
+  // Precompute the gaze field, and the callback
+  // will trigger maps aftewards.
   worker_gaze2field.postMessage({
     // type: 'computeGazeMap',
     gazeSets,
     IMG_WIDTH,
     IMG_HEIGHT,
     GAZE_INCLUDE_FIXATION_ONLY,
-    // GAZE_INCLUDE_ALL_FILES,
     GAZE_RADIUS,
     // scope: this  // cannot pass methods to worker! 
     // foo: function() { return 'bar';}   // same!
-  });
-
-  // This one doesn't rely on gaze to field computation,
-  // so can done in parallel.
-  worker_gaze2trajectory_hue.postMessage({
-    gazeSets,
-    IMG_WIDTH,
-    IMG_HEIGHT,
-    GAZE_INCLUDE_FIXATION_ONLY,
-    // GAZE_INCLUDE_ALL_FILES,
-    GAZE_RADIUS,
-    GAZE_HUE_RANGE,
-    GAZE_HUE_ALPHA_RANGE
   });
 }
 
@@ -180,45 +273,53 @@ function parseGazeJSON(gaze) {
 }
 
 
-/**
- * What to do when the worker is done computing the gaze field.
- * @param {*} field 
- * @param {*} size 
- */
-function handleGazeField(field, size) {
-  console.log(`Received gaze field with ${field.length} elements.`);
-  console.log(`Field size: ${size.width} x ${size.height}`);
-  // console.log(`Bounds: minVal=${bounds.minVal}, maxVal=${bounds.maxVal}`);
+function handleGazeField(event) {
+  // console.log(`Received gaze field with ${field.length} elements.`);
+  // console.log(`Field size: ${size.width} x ${size.height}`);
 
-  // Start the workers in parallel
-  worker_field2bw.postMessage({
-    // type: 'computeBWImage',
-    field,
-    size
-  });
+  // Create a big fat context object to pass to all the workers
+  const context = {
+    field: event.data.field,
+    size: event.data.size,
+    gazeSets: csvFiles.map(f => f.gazeData),
+    IMG_WIDTH,
+    IMG_HEIGHT,
+    GAZE_INCLUDE_FIXATION_ONLY,
+    GAZE_RADIUS,
+    GAZE_LINE_WEIGHT,
+    GAZE_HUE_RANGE,
+    GAZE_ALPHA_RANGE,
+    COLOR_SCALE_NAME,
+    COLOR_SCALE_RANGE,
+    COLOR_SCALE_INTERPOLATION_MODE
+  }
 
-  worker_field2hue.postMessage({
-    // type: 'computeHUEImage',
-    field,
-    size, 
-    range: GAZE_HUE_RANGE,
-    alphas: GAZE_HUE_ALPHA_RANGE
-  });
-
-  // Convert field to gaze-trajectory map
-  fieldToTrajectoryMapBW();
-  fieldToTrajectoryMapHUE();
+  // Start the workers
+  maps.forEach(mmap => {
+    const mapCtx = {name: mmap.name, ...context};
+    if (mmap.type == 'worker') 
+    {
+      mmap.worker.postMessage(mapCtx);
+    }
+    else if (mmap.type == 'function') {
+      mmap.func(mapCtx);
+    }
+  })
 }
 
 /**
  * Clears everything and resets the app to its initial state.
  */
 function resetApp() {
-  maps = [];
+  resetMaps();
   csvFiles = [];
   bgImg = null;
   topText = '';
   bottomText = `Drag and drop a background image and/or a valid gaze CSV file on this canvas.`;
+}
+
+function resetMaps() {
+  maps.forEach(map => map.image = null);  
 }
 
 
@@ -236,16 +337,15 @@ function resetApp() {
 /**
  * Creates a simple map with a black polyline connecting all gaze points.
  */
-function fieldToTrajectoryMapBW() {
-  const pg = createGraphics(IMG_WIDTH, IMG_HEIGHT);
-
+function fieldToTrajectoryMapBW(ctx) {
   // Draw gaze points as a polyline
+  const pg = createGraphics(ctx.IMG_WIDTH, ctx.IMG_HEIGHT);
   pg.stroke(0);
-  pg.strokeWeight(1);
+  pg.strokeWeight(ctx.GAZE_LINE_WEIGHT);
   pg.noFill();
   pg.beginShape();
-  for (let i = 0; i < csvFiles.length; i++) {
-    const gazeData = csvFiles[i].gazeData;
+  for (let i = 0; i < ctx.gazeSets.length; i++) {
+    const gazeData = ctx.gazeSets[i];
     for (let j = 0; j < gazeData.length; j++) {
       const x = gazeData[j].x;
       const y = gazeData[j].y;
@@ -255,47 +355,86 @@ function fieldToTrajectoryMapBW() {
   pg.endShape();
 
   const img = pg.get();
-  maps.push({
-    name: 'Gaze Trajectory B&W',
-    image: img,
-  });
+  const map = maps.find(m => m.name == ctx.name);
+  map.image = img;
 }
 
 /**
  * Creates a simple map with a colored polyline connecting all gaze points.
  * Uses HUE global settings and range. 
  */
-function fieldToTrajectoryMapHUE() {
+function fieldToTrajectoryMapHUE(ctx) {
   const vertices = [];
-  for (let i = 0; i < csvFiles.length; i++) {
-    const gazeData = csvFiles[i].gazeData;
+  for (let i = 0; i < ctx.gazeSets.length; i++) {
+    const gazeData = ctx.gazeSets[i];
     for (let j = 0; j < gazeData.length; j++) {
       vertices.push(gazeData[j].x, gazeData[j].y);
     }
   }
   const lineCount = Math.max(vertices.length / 2 - 1, 0);
 
-  const pg = createGraphics(IMG_WIDTH, IMG_HEIGHT);
+  const pg = createGraphics(ctx.IMG_WIDTH, ctx.IMG_HEIGHT);
   pg.noFill();
-  pg.strokeWeight(5);
-  const hueLen = GAZE_HUE_RANGE[1] - GAZE_HUE_RANGE[0];
+  pg.strokeWeight(ctx.GAZE_LINE_WEIGHT);
+  const hueLen = ctx.GAZE_HUE_RANGE[1] - ctx.GAZE_HUE_RANGE[0];
   for (let i = 0; i < lineCount; i++) {
     const x1 = vertices[i * 2];
     const y1 = vertices[i * 2 + 1];
     const x2 = vertices[i * 2 + 2];
     const y2 = vertices[i * 2 + 3];
     const n = i / lineCount;
-    const hue = GAZE_HUE_RANGE[0] + hueLen * n;
+    const hue = ctx.GAZE_HUE_RANGE[0] + hueLen * n;
     const rgba = HSBToRGB([hue, 100, 100, 100]);
     pg.stroke(rgba);
     pg.line(x1, y1, x2, y2);
   }
 
   const img = pg.get();
-  maps.push({
-    name: 'Gaze Trajectory HUE',
-    image: img,
-  });
+  const map = maps.find(m => m.name == ctx.name);
+  map.image = img;
+}
+
+
+
+/**
+ * Creates a simple map with a colored polyline connecting all gaze points.
+ * Uses a Chroma Color Scale following . 
+ */
+function fieldToTrajectoryMapColorScale(ctx) {
+  const vertices = [];
+  for (let i = 0; i < ctx.gazeSets.length; i++) {
+    const gazeData = ctx.gazeSets[i];
+    for (let j = 0; j < gazeData.length; j++) {
+      vertices.push(gazeData[j].x, gazeData[j].y);
+    }
+  }
+  const lineCount = Math.max(vertices.length / 2 - 1, 0);
+
+  const colorScale = chroma.scale(ctx.COLOR_SCALE_NAME)
+    .mode(ctx.COLOR_SCALE_INTERPOLATION_MODE);
+  const colorScaleLen = ctx.COLOR_SCALE_RANGE[1] - ctx.COLOR_SCALE_RANGE[0];
+
+  const pg = createGraphics(ctx.IMG_WIDTH, ctx.IMG_HEIGHT);
+  pg.noFill();
+  pg.strokeWeight(ctx.GAZE_LINE_WEIGHT);
+  for (let i = 0; i < lineCount; i++) {
+    const x1 = vertices[i * 2];
+    const y1 = vertices[i * 2 + 1];
+    const x2 = vertices[i * 2 + 2];
+    const y2 = vertices[i * 2 + 3];
+    const n = i / lineCount;
+    const nc = ctx.COLOR_SCALE_RANGE[0] + colorScaleLen * n;
+    // const rgba = colorScale(nc).rgba();
+    // rgba[3] = 255;  // chroma does 0-1 alpha
+    // pg.stroke(rgba);
+    const rgb = colorScale(nc).rgb();
+    pg.stroke(rgb);
+    pg.line(x1, y1, x2, y2);
+  }
+
+  const img = pg.get();
+  const map = maps.find(m => m.name == ctx.name);
+  map.image = img;
 }
 
 
@@ -326,8 +465,6 @@ function imgFromPixels(pixels) {
   img.updatePixels();
   return img;
 }
-
-
 /**
  * Returns the main callback function for the Map workers.
  * @param {*} mapName 
@@ -342,10 +479,9 @@ function loadMapWorkerCallback(mapName) {
 
       case 'pixelData':
         const img = imgFromPixels(event.data.pixels);
-        maps.push({
-          name: mapName,
-          image: img,
-        });
+        const name = event.data.name;
+        const map = maps.find(m => m.name == name);
+        map.image = img;
         break;
       
       case 'error':
@@ -375,10 +511,16 @@ function keyPressed() {
       showBGImg = !showBGImg;
       return;
 
-    // Clear all images
+    // Reset app
     case 'r':
     case 'R':
       resetApp();
+      return;
+
+    // Recompute everything
+    case 'u':
+    case 'U':
+      compute();
       return;
   }
 
@@ -419,3 +561,13 @@ function fitCanvasToWindow() {
   }
 }
 
+
+// A function that iterates over all the keys of the chroma.brewer object
+// and returns an array with the names of the color scales.
+function getChromaColorScales() {
+  const scales = [];
+  for (const key in chroma.brewer) {
+    scales.push(key);
+  }
+  return scales;
+}

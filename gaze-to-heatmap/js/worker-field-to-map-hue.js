@@ -6,13 +6,13 @@ importScripts('color-functions.js');
  * of pixels, where the field values are mapped to a HSV hue wheel.
  */
 onmessage = (event) => {
-  console.log("Started field to HSV pixel array.");
+  console.log(`Started map computation: "${event.data.name}"`);
 
   const field = event.data.field;
   const bounds = computeBounds(field);
   const maxv = bounds.maxVal;
-  const range = event.data.range;
-  const alphas = event.data.alphas;
+  const range = event.data.GAZE_HUE_RANGE;
+  const alphas = event.data.GAZE_ALPHA_RANGE;
 
   const pixels = new Uint8ClampedArray(field.length * 4);
   const notifyAt = Math.floor(field.length / 100);
@@ -43,6 +43,7 @@ onmessage = (event) => {
   console.log("Finished field to HSV pixel array.");
 
   postMessage({
+    name: event.data.name,
     type: 'pixelData',
     pixels,
   });

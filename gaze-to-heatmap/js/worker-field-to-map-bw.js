@@ -5,9 +5,7 @@ importScripts('utils.js');
  * of pixels, where the field values are mapped to a grayscale.
  */
 onmessage = (event) => {
-  // console.log(self);
-  
-  console.log("Started field to BW pixel array.");
+  console.log(`Started map computation: "${event.data.name}"`);
   
   const field = event.data.field;
   const bounds = computeBounds(field);
@@ -37,6 +35,7 @@ onmessage = (event) => {
   console.log("Finished field to BW pixel array.");
 
   postMessage({
+    name: event.data.name,
     type: 'pixelData',
     pixels,
   });

@@ -4,9 +4,7 @@ importScripts('color-functions.js');
 
 /**
  * Computes a heatmap of gaze based on temporal movement across frames. 
- * Uses a hue-based field to represent time, and an alpha field to represent intensity.
- * The result is a little meh, there is a v2 version that uses a direct color+alpha blend
- * approach.
+ * This version blends color better than v2, but has no alpha! 🤷‍♂️
  */
 onmessage = (event) => {
   console.log(`Started map computation: "${event.data.name}"`);
@@ -19,11 +17,15 @@ onmessage = (event) => {
   const data = event.data;
   let gazeSets = data.gazeSets;
 
-  // Create a field of hue values per pixel,
-  // and init to base hue
+  // For this one, we are going to work directly on the pixel data,
+  // as if painting over and fine-tuning blending colors based on intensity.
   const pixelCount = data.IMG_HEIGHT * data.IMG_WIDTH;
-  const hues = new Float32Array(pixelCount).fill(data.GAZE_HUE_RANGE[0]);
-  const alphas = new Float32Array(pixelCount).fill(0.0);
+  const pixels = new Float32Array(pixelCount * 4).fill(255);  // let's use a float array for better precision
+  // // Init to a transparent white (was getting black halos)
+  // for (let i = 0; i < pixelCount; i++) {
+  //   pixels[i * 4 + 3] = 0;
+  // }
+
   
   // Iterate over each gaze, and 'tint' the hue field with a corresponding time-based hue.
   const gazeCount = gazeSets.reduce((acc, set) => acc + set.length, 0);
@@ -31,7 +33,7 @@ onmessage = (event) => {
   let skippedCount = 0;
   let x, y, pid, d, v, n, h, i4, a;
   let x0, x1, y0, y1;
-  let rgba;
+  let rgb;
   const huelen = data.GAZE_HUE_RANGE[1] - data.GAZE_HUE_RANGE[0];
   const alphalen = data.GAZE_ALPHA_RANGE[1] - data.GAZE_ALPHA_RANGE[0];
   
@@ -46,13 +48,14 @@ onmessage = (event) => {
         continue;
       }
 
+      // Compute base color for this gaze point 
       n = total / gazeCount;
       h = data.GAZE_HUE_RANGE[0] + n * huelen;
+      rgb = HSBToRGB([h, 100, 100]);
 
+      // Compute the affected pixel area of this gaze point
       x = Math.round(gaze.x);
       y = Math.round(gaze.y);
-
-      // Compute the affected map area
       x0 = Math.min(Math.max(x - data.GAZE_RADIUS, 0), data.IMG_WIDTH - 1);
       x1 = Math.min(Math.max(x + data.GAZE_RADIUS, 0), data.IMG_WIDTH - 1);
       y0 = Math.min(Math.max(y - data.GAZE_RADIUS, 0), data.IMG_HEIGHT - 1);
@@ -64,8 +67,15 @@ onmessage = (event) => {
           if (pid < 0) continue;
           d = distance(x, y, j, k);
           v = 1.0 - smoothStep(0, data.GAZE_RADIUS, d);
-          alphas[pid] = Math.max(alphas[pid], v);  // keep whichever alpha has been historically higher
-          hues[pid] = hues[pid] * (1 - v) + h * v;  // blend the hues based on strength
+          i4 = pid * 4;
+          // Blend colors based on intensity
+          pixels[i4] = pixels[i4] * (1 - v) + rgb[0] * v;
+          pixels[i4 + 1] = pixels[i4 + 1] * (1 - v) + rgb[1] * v;
+          pixels[i4 + 2] = pixels[i4 + 2] * (1 - v) + rgb[2] * v;
+
+          // Keep the strongest alpha
+          a = 2.55 * (data.GAZE_ALPHA_RANGE[0] + v * alphalen);
+          pixels[i4 + 3] = Math.max(pixels[i4 + 3], a);
         }
       }
 
@@ -81,20 +91,6 @@ onmessage = (event) => {
   if (data.GAZE_INCLUDE_FIXATION_ONLY && skippedCount > 0) { 
     console.log(`Skipped ${skippedCount} rows because they're not fixations.`);
   }
-  
-  // Now convert the hues+alpha to a field of pixel color values
-  const pixels = new Uint8ClampedArray(pixelCount * 4);
-  for (let i = 0; i < pixelCount; i++) {
-    h = hues[i];
-    a = data.GAZE_ALPHA_RANGE[0] + alphas[i] * alphalen;
-    rgba = HSBToRGB([h, 100, 100, a]);
-    i4 = i * 4;
-    pixels[i4] = rgba[0];
-    pixels[i4 + 1] = rgba[1];
-    pixels[i4 + 2] = rgba[2];
-    pixels[i4 + 3] = rgba[3];
-  }
-  console.log("Finished gaze to Trajectory Map: Hue.");
 
   postMessage({
     name: event.data.name,
