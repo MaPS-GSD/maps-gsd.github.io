@@ -17,9 +17,9 @@ onmessage = (event) => {
   const data = event.data;
   const gazeSets = event.data.gazeSets;
 
-  if (!data.GAZE_INCLUDE_ALL_FILES) {
-    gazeSets = gazeSets.slice(-1);
-  }
+  // if (!data.GAZE_INCLUDE_ALL_FILES) {
+  //   gazeSets = gazeSets.slice(-1);
+  // }
 
   function pixelID(x, y) {
     return y * data.IMG_WIDTH + x;
@@ -48,7 +48,7 @@ onmessage = (event) => {
 
       x = Math.round(gaze.x);
       y = Math.round(gaze.y);
-      pid = pixelID(x, y);
+      // pid = pixelID(x, y);
 
       // Compute the affected map area
       x0 = Math.min(Math.max(x - data.GAZE_RADIUS, 0), data.IMG_WIDTH - 1);

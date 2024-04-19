@@ -6,10 +6,10 @@ const GAZE_Y_COLNAME = "gaze y [px]";
 const GAZE_FIXATION_COLNAME = "fixation id";
 const GAZE_TIMESTAMP_COLNAME = "timestamp [ns]";
 const GAZE_INCLUDE_FIXATION_ONLY = false;
-const GAZE_INCLUDE_ALL_FILES = true;
+// const GAZE_INCLUDE_ALL_FILES = true;  // not used anymore
 const GAZE_RADIUS = 30; // in pixels
 const GAZE_HUE_RANGE = [240, -50]; // in degrees
-const GAZE_HUE_ALPHA_RANGE = [0,  70]; // in [0, 100] range 
+const GAZE_HUE_ALPHA_RANGE = [0, 70]; // in [0, 100] range 
 
 // UI params (do not modify)
 const TEXT_SIZE_L = 14;
@@ -27,17 +27,16 @@ let csvFiles = [];
 let bgImg;
 let showBGImg = true;
 let gazeImgBW, gazeImgHue;
-let worker_gaze2field, worker_field2bw, worker_field2hue;
+let worker_gaze2field, 
+    worker_field2bw, 
+    worker_field2hue, 
+    worker_gaze2trajectory_hue;
 
 // The collection of generated maps.
-const maps = {};
-const mapNames = [
-  "Gaze Heatmap: B&W",
-  "Gaze Heatmap: Hue"
-];
-let currentMapId = 1;
+let maps = [];
+let currentMapId = 0;
 let topText = "";
-let bottomText = `Drag and drop a background image and/or a valid gaze CSV file on this canvas.`;
+let bottomText = "";
 
 function setup() {
   // Set up workers
@@ -64,6 +63,8 @@ function setup() {
   worker_field2hue = new Worker('js/worker-field-to-map-hue.js');
   worker_field2hue.onmessage = loadMapWorkerCallback('Gaze Heatmap: Hue');
 
+  worker_gaze2trajectory_hue = new Worker('js/worker-gaze-to-trajectory-map-hue.js');
+  worker_gaze2trajectory_hue.onmessage = loadMapWorkerCallback('Gaze Trajectory: Hue');
 
 
   // Set canvas up
@@ -77,6 +78,8 @@ function setup() {
   noStroke();
   textFont(TEXT_FONT);
   textAlign(CENTER, CENTER);
+
+  resetApp();
 }
 
 function draw() {
@@ -88,11 +91,10 @@ function draw() {
   }
 
   // Render current map
-  let img = maps[mapNames[currentMapId]];
-  if (img) {
-    // console.log("rendering " + img + " map");
-    image(img, 0.5 * width, 0.5 * height, width, height);
-    bottomText = `Displaying '${mapNames[currentMapId]}'`;
+  let imgObj = maps[currentMapId];
+  if (imgObj && imgObj.image) {
+    image(imgObj.image, 0.5 * width, 0.5 * height, width, height);
+    bottomText = `Displaying computed map ${currentMapId + 1}/${maps.length}: '${imgObj.name}'`;
   }
 
   // Render UI stuff
@@ -105,6 +107,8 @@ function draw() {
 
 
 function gotFile(file) {
+  // New maps
+  maps = [];
 
   if (file.type === 'image') {
     bottomText = 'Loading image...';
@@ -128,16 +132,30 @@ function gotFile(file) {
   bottomText = 'Parsing file...';
 
   // Use workers to push all the heavy computation to a separate thread
+  const gazeSets = csvFiles.map(f => f.gazeData);
   worker_gaze2field.postMessage({
-    type: 'computeGazeMap',
-    gazeSets: csvFiles.map(f => f.gazeData),
+    // type: 'computeGazeMap',
+    gazeSets,
     IMG_WIDTH,
     IMG_HEIGHT,
     GAZE_INCLUDE_FIXATION_ONLY,
-    GAZE_INCLUDE_ALL_FILES,
+    // GAZE_INCLUDE_ALL_FILES,
     GAZE_RADIUS,
     // scope: this  // cannot pass methods to worker! 
     // foo: function() { return 'bar';}   // same!
+  });
+
+  // This one doesn't rely on gaze to field computation,
+  // so can done in parallel.
+  worker_gaze2trajectory_hue.postMessage({
+    gazeSets,
+    IMG_WIDTH,
+    IMG_HEIGHT,
+    GAZE_INCLUDE_FIXATION_ONLY,
+    // GAZE_INCLUDE_ALL_FILES,
+    GAZE_RADIUS,
+    GAZE_HUE_RANGE,
+    GAZE_HUE_ALPHA_RANGE
   });
 }
 
@@ -186,7 +204,112 @@ function handleGazeField(field, size) {
     range: GAZE_HUE_RANGE,
     alphas: GAZE_HUE_ALPHA_RANGE
   });
+
+  // Convert field to gaze-trajectory map
+  fieldToTrajectoryMapBW();
+  fieldToTrajectoryMapHUE();
 }
+
+/**
+ * Clears everything and resets the app to its initial state.
+ */
+function resetApp() {
+  maps = [];
+  csvFiles = [];
+  bgImg = null;
+  topText = '';
+  bottomText = `Drag and drop a background image and/or a valid gaze CSV file on this canvas.`;
+}
+
+
+
+// ███╗   ███╗ █████╗ ██████╗ ███████╗
+// ████╗ ████║██╔══██╗██╔══██╗██╔════╝
+// ██╔████╔██║███████║██████╔╝███████╗
+// ██║╚██╔╝██║██╔══██║██╔═══╝ ╚════██║
+// ██║ ╚═╝ ██║██║  ██║██║     ███████║
+// ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝     ╚══════╝
+//                                    
+// Map-generation functions that cannot be wrapped in a worker
+// because they are p5.js-based (and p5.js cannot be used in workers).
+
+/**
+ * Creates a simple map with a black polyline connecting all gaze points.
+ */
+function fieldToTrajectoryMapBW() {
+  const pg = createGraphics(IMG_WIDTH, IMG_HEIGHT);
+
+  // Draw gaze points as a polyline
+  pg.stroke(0);
+  pg.strokeWeight(1);
+  pg.noFill();
+  pg.beginShape();
+  for (let i = 0; i < csvFiles.length; i++) {
+    const gazeData = csvFiles[i].gazeData;
+    for (let j = 0; j < gazeData.length; j++) {
+      const x = gazeData[j].x;
+      const y = gazeData[j].y;
+      pg.vertex(x, y);
+    }
+  }
+  pg.endShape();
+
+  const img = pg.get();
+  maps.push({
+    name: 'Gaze Trajectory B&W',
+    image: img,
+  });
+}
+
+/**
+ * Creates a simple map with a colored polyline connecting all gaze points.
+ * Uses HUE global settings and range. 
+ */
+function fieldToTrajectoryMapHUE() {
+  const vertices = [];
+  for (let i = 0; i < csvFiles.length; i++) {
+    const gazeData = csvFiles[i].gazeData;
+    for (let j = 0; j < gazeData.length; j++) {
+      vertices.push(gazeData[j].x, gazeData[j].y);
+    }
+  }
+  const lineCount = Math.max(vertices.length / 2 - 1, 0);
+
+  const pg = createGraphics(IMG_WIDTH, IMG_HEIGHT);
+  pg.noFill();
+  pg.strokeWeight(5);
+  const hueLen = GAZE_HUE_RANGE[1] - GAZE_HUE_RANGE[0];
+  for (let i = 0; i < lineCount; i++) {
+    const x1 = vertices[i * 2];
+    const y1 = vertices[i * 2 + 1];
+    const x2 = vertices[i * 2 + 2];
+    const y2 = vertices[i * 2 + 3];
+    const n = i / lineCount;
+    const hue = GAZE_HUE_RANGE[0] + hueLen * n;
+    const rgba = HSBToRGB([hue, 100, 100, 100]);
+    pg.stroke(rgba);
+    pg.line(x1, y1, x2, y2);
+  }
+
+  const img = pg.get();
+  maps.push({
+    name: 'Gaze Trajectory HUE',
+    image: img,
+  });
+}
+
+
+
+
+
+
+// ██╗   ██╗████████╗██╗██╗     ███████╗
+// ██║   ██║╚══██╔══╝██║██║     ██╔════╝
+// ██║   ██║   ██║   ██║██║     ███████╗
+// ██║   ██║   ██║   ██║██║     ╚════██║
+// ╚██████╔╝   ██║   ██║███████╗███████║
+//  ╚═════╝    ╚═╝   ╚═╝╚══════╝╚══════╝
+//                                      
 
 /**
  * Creates a p5.Image from a pixel array.
@@ -217,9 +340,12 @@ function loadMapWorkerCallback(mapName) {
         bottomText = `Computing '${mapName}': ${Math.round(100 * event.data.value)}%`;
         break;
 
-      case 'fieldImg':
+      case 'pixelData':
         const img = imgFromPixels(event.data.pixels);
-        maps[mapName] = img;
+        maps.push({
+          name: mapName,
+          image: img,
+        });
         break;
       
       case 'error':
@@ -235,18 +361,12 @@ function loadMapWorkerCallback(mapName) {
 
 function keyPressed() {
   switch(key) {
-    // Save the gaze maps as images
+    // Save currently displayed map
     case 's':
     case 'S':
-      // save(gazeImgBW, 'gaze_map_bw.png');
-      // save(gazeImgHue, 'gaze_map_hue.png');
-      mapNames.forEach(name => {
-        const img = maps[name];
-        const csvfilename = csvFiles.length == 1 ? csvFiles[0].file.name : `multiple_csv`;
-        if (img) {
-          save(img, `${safeFilename(csvfilename)}_${safeFilename(name)}.png`);
-        }
-      });
+      const map = maps[currentMapId];
+      const csvfilename = csvFiles.length == 1 ? csvFiles[0].file.name : `multiple_csv`;
+      save(map.image, `${safeFilename(csvfilename)}_${safeFilename(map.name)}.png`);
       return;
       
     // Toggle background image
@@ -255,17 +375,23 @@ function keyPressed() {
       showBGImg = !showBGImg;
       return;
 
-    }
+    // Clear all images
+    case 'r':
+    case 'R':
+      resetApp();
+      return;
+  }
+
     
   // Switch between gaze maps with arrow keys
   switch(keyCode) {
     case LEFT_ARROW:
-      currentMapId = (currentMapId - 1 + mapNames.length) % mapNames.length;
+      currentMapId = (currentMapId - 1 + maps.length) % maps.length;
       return;
     case RIGHT_ARROW:
-      currentMapId = (currentMapId + 1) % mapNames.length;
+      currentMapId = (currentMapId + 1) % maps.length;
       return;
-  } 
+  }
 }
 
 function windowResized() {

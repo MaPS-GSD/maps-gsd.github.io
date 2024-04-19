@@ -43,7 +43,7 @@ onmessage = (event) => {
   console.log("Finished field to HSV pixel array.");
 
   postMessage({
-    type: 'fieldImg',
+    type: 'pixelData',
     pixels,
   });
 }

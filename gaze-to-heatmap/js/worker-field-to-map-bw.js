@@ -37,7 +37,7 @@ onmessage = (event) => {
   console.log("Finished field to BW pixel array.");
 
   postMessage({
-    type: 'fieldImg',
+    type: 'pixelData',
     pixels,
   });
 }
