@@ -81,19 +81,19 @@ let maps = [{
 {
   name: 'Gaze Trajectory Path - B&W',
   type: 'function',
-  func: fieldToTrajectoryMapBW,
+  func: fieldToTrajectoryPathBW,
   image: null
 },
 {
   name: 'Gaze Trajectory Path - Hue',
   type: 'function',
-  func: fieldToTrajectoryMapHUE,
+  func: fieldToTrajectoryPathHUE,
   image: null
 },
 {
   name: 'Gaze Trajectory Path - Color Scale',
   type: 'function',
-  func: fieldToTrajectoryMapColorScale,
+  func: fieldToTrajectoryPathColorScale,
   image: null
 },
 {
@@ -144,6 +144,12 @@ let maps = [{
     w.onmessage = loadMapWorkerCallback('Gaze Trajectory Map - Color Scale v3');
     return w;
   })(),
+  image: null
+},
+{
+  name: 'Gaze Speed Path - Color Scale',
+  type: 'function',
+  func: fieldToSpeedPathColorScale,
   image: null
 }
 ];
@@ -337,7 +343,7 @@ function resetMaps() {
 /**
  * Creates a simple map with a black polyline connecting all gaze points.
  */
-function fieldToTrajectoryMapBW(ctx) {
+function fieldToTrajectoryPathBW(ctx) {
   // Draw gaze points as a polyline
   const pg = createGraphics(ctx.IMG_WIDTH, ctx.IMG_HEIGHT);
   pg.stroke(0);
@@ -363,7 +369,7 @@ function fieldToTrajectoryMapBW(ctx) {
  * Creates a simple map with a colored polyline connecting all gaze points.
  * Uses HUE global settings and range. 
  */
-function fieldToTrajectoryMapHUE(ctx) {
+function fieldToTrajectoryPathHUE(ctx) {
   const vertices = [];
   for (let i = 0; i < ctx.gazeSets.length; i++) {
     const gazeData = ctx.gazeSets[i];
@@ -395,12 +401,11 @@ function fieldToTrajectoryMapHUE(ctx) {
 }
 
 
-
 /**
  * Creates a simple map with a colored polyline connecting all gaze points.
  * Uses a Chroma Color Scale following . 
  */
-function fieldToTrajectoryMapColorScale(ctx) {
+function fieldToTrajectoryPathColorScale(ctx) {
   const vertices = [];
   for (let i = 0; i < ctx.gazeSets.length; i++) {
     const gazeData = ctx.gazeSets[i];
@@ -437,6 +442,63 @@ function fieldToTrajectoryMapColorScale(ctx) {
   map.image = img;
 }
 
+
+/**
+ * Draws a path colored by gaze speed.
+ * Uses a Chroma Color Scale. 
+ */
+function fieldToSpeedPathColorScale(ctx) {
+  const vertices = [];
+  for (let i = 0; i < ctx.gazeSets.length; i++) {
+    const gazeData = ctx.gazeSets[i];
+    for (let j = 0; j < gazeData.length; j++) {
+      vertices.push(gazeData[j].x, gazeData[j].y);
+    }
+  }
+  const lineCount = Math.max(vertices.length / 2 - 1, 0);
+  
+  // Compute speeds
+  const speeds = [];
+  for (let i = 0; i < lineCount; i++) {
+    const x1 = vertices[i * 2];
+    const y1 = vertices[i * 2 + 1];
+    const x2 = vertices[i * 2 + 2];
+    const y2 = vertices[i * 2 + 3];
+    const d = distance(x1, y1, x2, y2);
+    // We have to assume for this one that all intervals are the same... 
+    // const t = ctx.gazeSets[0][i + 1].t - ctx.gazeSets[0][i].t;
+    // const s = d / t;
+    // speeds.push(s);
+    speeds.push(d);
+  }
+  const speedRange = computeBounds(speeds);
+  const speedLen = speedRange.maxVal - speedRange.minVal;
+
+
+  const colorScale = chroma.scale(ctx.COLOR_SCALE_NAME)
+    .mode(ctx.COLOR_SCALE_INTERPOLATION_MODE);
+  const colorScaleLen = ctx.COLOR_SCALE_RANGE[1] - ctx.COLOR_SCALE_RANGE[0];
+
+  const pg = createGraphics(ctx.IMG_WIDTH, ctx.IMG_HEIGHT);
+  pg.noFill();
+  pg.strokeWeight(ctx.GAZE_LINE_WEIGHT);
+  for (let i = 0; i < lineCount; i++) {
+    const x1 = vertices[i * 2];
+    const y1 = vertices[i * 2 + 1];
+    const x2 = vertices[i * 2 + 2];
+    const y2 = vertices[i * 2 + 3];
+    const s = speeds[i];
+    const n = (s - speedRange.minVal) / speedLen;
+    const nc = ctx.COLOR_SCALE_RANGE[0] + colorScaleLen * n;
+    const rgb = colorScale(nc).rgb();
+    pg.stroke(rgb);
+    pg.line(x1, y1, x2, y2);
+  }
+
+  const img = pg.get();
+  const map = maps.find(m => m.name == ctx.name);
+  map.image = img;
+}
 
 
 
