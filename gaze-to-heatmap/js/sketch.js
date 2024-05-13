@@ -14,7 +14,7 @@ let GAZE_ALPHA_RANGE = [0, 70]; // in [0, 100] range
 // When computing gaze locations inside object masks, 
 // only consider gaze points that are within this distance 
 // or grater from the boundary. 
-let GAZE_LOCATION_MASK_SAFE_OFFSET = 20;
+let GAZE_LOCATION_MASK_SAFE_OFFSET = 0;
 
 
 // Color scales! 🌈
