@@ -11,6 +11,11 @@ let GAZE_LINE_WEIGHT = 2; // in pixels
 let GAZE_HUE_RANGE = [240, -50]; // in degrees
 let GAZE_ALPHA_RANGE = [0, 70]; // in [0, 100] range 
 
+// When computing gaze locations inside object masks, 
+// only consider gaze points that are within this distance 
+// or grater from the boundary. 
+let GAZE_LOCATION_MASK_SAFE_OFFSET = 20;
+
 
 // Color scales! 🌈
 // For now, we will be only using _named_ color scales from the R colorBrewer package.
@@ -22,13 +27,13 @@ let GAZE_ALPHA_RANGE = [0, 70]; // in [0, 100] range
 // Note that most Brewer color scales go from lighter to darker,
 // so if you want to link smaller values to darker colors, you should reverse the scale.
 // const COLOR_SCALE_NAME = 'RdYlGn';
-let COLOR_SCALE_NAME = 'Viridis';
+let COLOR_SCALE_NAME = 'Viridis';  // gradient scale
+let COLOR_SCALE_NAME_CAT = 'Set2';  // categorical scale
 // const COLOR_SCALE_RANGE = [0, 1];  // the value range for the color scale in [0,1] 
 let COLOR_SCALE_RANGE = [1, 0];  // this flips the color scale 
 let COLOR_SCALE_INTERPOLATION_MODE = 'rgb';
 
-console.log("Available color scale names: ");
-console.log(getChromaColorScales());
+console.log("Available color scale names: ", getChromaColorScales());
 console.log("See more at https://www.datanovia.com/en/blog/the-a-z-of-rcolorbrewer-palette/")
 
 
@@ -54,6 +59,9 @@ let worker_gaze2field;
 let currentMapId = 0;
 let topText = "";
 let bottomText = "";
+
+// Optional mask polygons for gaze containment
+let objectMasks;
 
 // The collection of generated maps.
 let maps = [{
@@ -151,6 +159,13 @@ let maps = [{
   type: 'function',
   func: fieldToSpeedPathColorScale,
   image: null
+},
+{
+  name: 'Gaze Location - Object Masks',
+  type: 'function',
+  func: gazeToMaskedLocations,
+  image: null,
+  data: null
 }
 ];
 
@@ -215,7 +230,17 @@ function draw() {
 }
 
 
+/**
+ * What to do when a user drops a file on the canvas.
+ * @param {*} file 
+ * @returns 
+ */
 function gotFile(file) {
+  // console.log(file);
+
+  topText = `Loaded file: '${file.name}', file type: ${file.type}, file size: ${file.size} bytes`;
+
+  // Background image?
   if (file.type === 'image') {
     bottomText = 'Loading image...';
     
@@ -226,18 +251,37 @@ function gotFile(file) {
     
     return;
   }
-    
-  const csvF = {
-    file: file,
-    gazeData: csvToJSON(file).map(parseGazeJSON)
+
+  // JSON file with object masks?
+  if (file.type === 'application' && file.subtype === 'json') {
+    // Is it a mask file?
+    if (file.data['type'] === 'object-masks') {
+      objectMasks = file.data;
+    }
+    const msg = `Imported mask file with ${objectMasks['objects'].length} objects`;
+    console.log(msg);
+    bottomText = msg;
+
+    if (csvFiles.length > 0) {
+      compute();
+    }
+    return;
   }
-  csvFiles.push(csvF);
-  
-  topText = `Loaded file: '${file.name}', file type: ${file.type}, file size: ${file.size} bytes`;
-  
-  bottomText = 'Parsing file...';
-  
-  compute();
+
+  // CSV file with gazes?
+  if (file.type === 'text' && file.subtype === 'csv') {
+    const csvF = {
+      file: file,
+      gazeData: csvToJSON(file).map(parseGazeJSON)
+    }
+    csvFiles.push(csvF);
+    
+    bottomText = 'Parsing file...';
+    
+    compute();
+
+    return;
+  }
 }
 
 function compute() {
@@ -296,8 +340,14 @@ function handleGazeField(event) {
     GAZE_HUE_RANGE,
     GAZE_ALPHA_RANGE,
     COLOR_SCALE_NAME,
+    COLOR_SCALE_NAME_CAT,
     COLOR_SCALE_RANGE,
-    COLOR_SCALE_INTERPOLATION_MODE
+    COLOR_SCALE_INTERPOLATION_MODE,
+    GAZE_LOCATION_MASK_SAFE_OFFSET,
+    TEXT_FONT,
+    TEXT_SIZE_S,
+    TEXT_SIZE_M,
+    TEXT_SIZE_L
   }
 
   // Start the workers
@@ -501,6 +551,108 @@ function fieldToSpeedPathColorScale(ctx) {
 }
 
 
+// This could have been a worker, but since we need to use p5.js
+// to draw the image, we'll do here for the time being...
+function gazeToMaskedLocations(ctx) {
+  const map = maps.find(m => m.name == ctx.name);
+
+  // No masks? Done.
+  if (!objectMasks) {
+    map.image = imgFromColor(ctx.IMG_WIDTH, ctx.IMG_HEIGHT, 0,0,0);
+    return;
+  }
+
+  // Create a dic of objects
+  const areas = {};
+  objectMasks.objects.forEach(obj => {
+    areas[obj.name] = {
+      count: 0,
+      points: []
+    };
+  });
+
+  // Remmebert that containment in SDFs is negative  
+  const threshold = -ctx.GAZE_LOCATION_MASK_SAFE_OFFSET;
+
+  // Iterate over all the gaze sets, and for each gaze point,
+  // figure out if it's inside any of the masks.
+  // Multiple masks per point are allowed.
+  objectMasks.objects.forEach(mask => {
+    const name = mask.name;
+    const vert = mask.vertices;
+
+    ctx.gazeSets.forEach(set => {
+      set.forEach(gaze => {
+        const sdf = SDFPolygon(vert, gaze.x, gaze.y);
+        if (sdf <= threshold) {
+          areas[name]['count']++;
+          areas[name]['points'].push([gaze.x, gaze.y]);
+        }
+      });
+    });
+  });
+
+  // Compute gaze location totals with ratios
+  const gazeCount = ctx.gazeSets.reduce((acc, set) => acc + set.length, 0);
+  const maskData = objectMasks.objects.map(obj => {
+    const name = obj.name;
+    const poly = objectMasks.objects.find(o => o.name == name).vertices;
+    const count = areas[name]['count'];
+    const ratio = count / gazeCount;
+    const points = areas[name]['points'];
+    return {name, poly, count, ratio, points};
+  });
+
+  // Store only important numerical information for export
+  map.data = maskData.map(m => {
+    return {
+      name: m.name,
+      count: m.count,
+      ratio: m.ratio
+    };
+  })
+
+  // Represent these visually
+  const colorSet = chroma.brewer[ctx.COLOR_SCALE_NAME_CAT];
+  const pg = createGraphics(ctx.IMG_WIDTH, ctx.IMG_HEIGHT);
+  pg.background(255);
+  pg.textAlign(CENTER, CENTER);
+  for (let i = 0; i < maskData.length; i++) {
+    const mask = maskData[i];
+    const color = colorSet[i % colorSet.length];
+    const color50 = addAlpha(color, 127);
+    const color25 = addAlpha(color, 63);
+    
+    // Draw poly + fill
+    pg.stroke(color);
+    pg.strokeWeight(2);
+    pg.strokeJoin(ROUND);
+    pg.fill(color25);
+    pg.beginShape();
+    for (let j = 0; j < mask.poly.length; j += 2) {
+      pg.vertex(mask.poly[j], mask.poly[j + 1]);
+    }
+    pg.endShape(CLOSE);
+
+    // Draw points
+    pg.stroke(color50);
+    mask.points.forEach(p => {
+      pg.point(p[0], p[1]);
+    });
+
+    // Draw text
+    const msg = `${mask.name}\n(${mask.count} / ${(100 * mask.ratio).toFixed(2)}%)`;
+    const c = polygonCenter(mask.poly);
+    pg.fill(color);
+    pg.noStroke();
+    pg.textFont(ctx.TEXT_FONT);
+    pg.textSize(ctx.TEXT_SIZE_L);
+    pg.text(msg, c[0], c[1]);
+  }
+
+  map.image = pg.get();
+}
+
 
 
 
@@ -527,6 +679,21 @@ function imgFromPixels(pixels) {
   img.updatePixels();
   return img;
 }
+
+/**
+ * Creates a solid color p5.Image.
+ * @param {*} r 
+ * @param {*} g 
+ * @param {*} b 
+ * @returns 
+ */
+function imgFromColor(w, h, r, g, b) {
+  const pg = createGraphics(w, h);
+  pg.background(r, g, b);
+  return pg.get();
+}
+
+
 /**
  * Returns the main callback function for the Map workers.
  * @param {*} mapName 
@@ -565,6 +732,9 @@ function keyPressed() {
       const map = maps[currentMapId];
       const csvfilename = csvFiles.length == 1 ? csvFiles[0].file.name : `multiple_csv`;
       save(map.image, `${safeFilename(csvfilename)}_${safeFilename(map.name)}.png`);
+      if (map.data) {
+        saveJSON(map.data, `${safeFilename(csvfilename)}_${safeFilename(map.name)}_data.json`);
+      }
       return;
       
     // Toggle background image
