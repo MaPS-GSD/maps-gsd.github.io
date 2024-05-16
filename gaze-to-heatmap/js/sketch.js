@@ -14,7 +14,9 @@ let GAZE_ALPHA_RANGE = [0, 70]; // in [0, 100] range
 // When computing gaze locations inside object masks, 
 // only consider gaze points that are within this distance 
 // or grater from the boundary. 
-let GAZE_LOCATION_MASK_SAFE_OFFSET = 0;
+let GAZE_MASK_SAFE_OFFSET = 0;
+let GAZE_MASK_RENDER_POINTS = true;
+let GAZE_MASK_RENDER_LABELS = true;
 
 
 // Color scales! 🌈
@@ -161,7 +163,7 @@ let maps = [{
   image: null
 },
 {
-  name: 'Gaze Location - Object Masks',
+  name: 'Gaze Location - Object Masks (press P or L to toggle Points or Label views)',
   type: 'function',
   func: gazeToMaskedLocations,
   image: null,
@@ -343,7 +345,7 @@ function handleGazeField(event) {
     COLOR_SCALE_NAME_CAT,
     COLOR_SCALE_RANGE,
     COLOR_SCALE_INTERPOLATION_MODE,
-    GAZE_LOCATION_MASK_SAFE_OFFSET,
+    GAZE_LOCATION_MASK_SAFE_OFFSET: GAZE_MASK_SAFE_OFFSET,
     TEXT_FONT,
     TEXT_SIZE_S,
     TEXT_SIZE_M,
@@ -579,14 +581,19 @@ function gazeToMaskedLocations(ctx) {
   // Multiple masks per point are allowed.
   objectMasks.objects.forEach(mask => {
     const name = mask.name;
-    const vert = mask.vertices;
-
+    // const vert = mask.vertices;
+    const polys = mask.polys;
+    
     ctx.gazeSets.forEach(set => {
-      set.forEach(gaze => {
-        const sdf = SDFPolygon(vert, gaze.x, gaze.y);
-        if (sdf <= threshold) {
-          areas[name]['count']++;
-          areas[name]['points'].push([gaze.x, gaze.y]);
+      set.forEach(gazept => {
+        for (let i = 0; i < polys.length; i++) {
+          const poly = polys[i];
+          const sdf = SDFPolygon(poly, gazept.x, gazept.y);
+          if (sdf <= threshold) {
+            areas[name]['count']++;
+            areas[name]['points'].push([gazept.x, gazept.y]);
+            return;     // only one poly inside this mask per point
+          }
         }
       });
     });
@@ -596,11 +603,11 @@ function gazeToMaskedLocations(ctx) {
   const gazeCount = ctx.gazeSets.reduce((acc, set) => acc + set.length, 0);
   const maskData = objectMasks.objects.map(obj => {
     const name = obj.name;
-    const poly = objectMasks.objects.find(o => o.name == name).vertices;
+    const polys = objectMasks.objects.find(o => o.name == name).polys;
     const count = areas[name]['count'];
     const ratio = count / gazeCount;
     const points = areas[name]['points'];
-    return {name, poly, count, ratio, points};
+    return {name, polys, count, ratio, points};
   });
 
   // Store only important numerical information for export
@@ -628,26 +635,35 @@ function gazeToMaskedLocations(ctx) {
     pg.strokeWeight(2);
     pg.strokeJoin(ROUND);
     pg.fill(color25);
-    pg.beginShape();
-    for (let j = 0; j < mask.poly.length; j += 2) {
-      pg.vertex(mask.poly[j], mask.poly[j + 1]);
+    for (let k = 0; k < mask.polys.length; k++) {
+      const poly = mask.polys[k];
+      pg.beginShape();
+      for (let j = 0; j < poly.length; j += 2) {
+        pg.vertex(poly[j], poly[j + 1]);
+      }
+      pg.endShape(CLOSE);
     }
-    pg.endShape(CLOSE);
 
     // Draw points
-    pg.stroke(color50);
-    mask.points.forEach(p => {
-      pg.point(p[0], p[1]);
-    });
+    if (GAZE_MASK_RENDER_POINTS)
+    {
+      pg.stroke(color50);
+      mask.points.forEach(p => {
+        pg.point(p[0], p[1]);
+      });
+    }
 
     // Draw text
-    const msg = `${mask.name}\n(${mask.count} / ${(100 * mask.ratio).toFixed(2)}%)`;
-    const c = polygonCenter(mask.poly);
-    pg.fill(color);
-    pg.noStroke();
-    pg.textFont(ctx.TEXT_FONT);
-    pg.textSize(ctx.TEXT_SIZE_L);
-    pg.text(msg, c[0], c[1]);
+    if (GAZE_MASK_RENDER_LABELS && mask.polys[0])
+    {
+      const msg = `${mask.name}\n(${mask.count} / ${(100 * mask.ratio).toFixed(2)}%)`;
+      const c = polygonCenter(mask.polys[0]);  // use the center of the first poly
+      pg.fill(color);
+      pg.noStroke();
+      pg.textFont(ctx.TEXT_FONT);
+      pg.textSize(ctx.TEXT_SIZE_L);
+      pg.text(msg, c[0], c[1]);
+    }
   }
 
   map.image = pg.get();
@@ -735,25 +751,38 @@ function keyPressed() {
       if (map.data) {
         saveJSON(map.data, `${safeFilename(csvfilename)}_${safeFilename(map.name)}_data.json`);
       }
-      return;
+      break;
       
     // Toggle background image
     case 'b':
     case 'B':
       showBGImg = !showBGImg;
-      return;
+      break;
 
     // Reset app
     case 'r':
     case 'R':
       resetApp();
-      return;
+      break;
 
     // Recompute everything
     case 'u':
     case 'U':
       compute();
-      return;
+      break;
+
+    case 'p':
+    case 'P':
+      console.log("here");
+      GAZE_MASK_RENDER_POINTS = !GAZE_MASK_RENDER_POINTS;
+      compute();  // image needs to be re-rendered
+      break;
+
+    case 'l':
+    case 'L':
+      GAZE_MASK_RENDER_LABELS = !GAZE_MASK_RENDER_LABELS;
+      compute();  // image needs to be re-rendered
+      break;
   }
 
     

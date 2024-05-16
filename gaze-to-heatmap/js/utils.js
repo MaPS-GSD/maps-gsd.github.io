@@ -171,22 +171,22 @@ function polygonArea(vertices) {
 }
 
 
-function polygonCenter(vertices) {
-  // copilot-generated
-  let cx = 0;
-  let cy = 0;
-  let area = polygonArea(vertices);
-  for (let i = 0; i < vertices.length; i += 2) {
-    const x0 = vertices[i];
-    const y0 = vertices[i + 1];
-    const x1 = vertices[(i + 2) % vertices.length];
-    const y1 = vertices[(i + 3) % vertices.length];
-    const cross = x0 * y1 - x1 * y0;
-    cx += (x0 + x1) * cross;
-    cy += (y0 + y1) * cross;
-  }
-  return [cx / (6 * area), cy / (6 * area)];
-}
+// function polygonCenter(vertices) {
+//   // copilot-generated
+//   let cx = 0;
+//   let cy = 0;
+//   let area = polygonArea(vertices);
+//   for (let i = 0; i < vertices.length; i += 2) {
+//     const x0 = vertices[i];
+//     const y0 = vertices[i + 1];
+//     const x1 = vertices[(i + 2) % vertices.length];
+//     const y1 = vertices[(i + 3) % vertices.length];
+//     const cross = x0 * y1 - x1 * y0;
+//     cx += (x0 + x1) * cross;
+//     cy += (y0 + y1) * cross;
+//   }
+//   return [cx / (6 * area), cy / (6 * area)];
+// }
 
 
 /**
